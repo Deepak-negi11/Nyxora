@@ -9,7 +9,7 @@ import { Minus, Plus } from "lucide-react";
 import { MarketData } from "@/hooks/useMarket";
 import { useProgram } from "@/hooks/useProgram";
 import { useToast } from "./Toast";
-import { lamportsToToken, tokenToLamports } from "@/lib/format";
+import { formatPrice, lamportsToToken, tokenToLamports } from "@/lib/format";
 import {
   getMarketPda,
   getOrderPda,
@@ -277,7 +277,7 @@ export default function TradeTicket({
     <section className="trade-ticket">
       <div className="ticket-market-head">
         <span>Market · {marketPair}</span>
-        <strong>{price > 0 ? price.toFixed(6) : "-"}</strong>
+        <strong>{formatPrice(price)}</strong>
       </div>
 
       {!publicKey ? (

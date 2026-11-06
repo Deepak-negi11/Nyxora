@@ -7,13 +7,12 @@ import type {
   Signer,
   VersionedTransaction,
 } from "@solana/web3.js";
-import { HermesClient } from "@pythnetwork/hermes-client";
+import { createHermesClient, describeHermesError } from "@/lib/hermes";
 import {
   PythSolanaReceiver,
   type InstructionWithEphemeralSigners,
 } from "@pythnetwork/pyth-solana-receiver";
 
-const DEFAULT_HERMES_ENDPOINT = "https://hermes.pyth.network";
 const PYTH_COMPUTE_UNIT_PRICE_MICRO_LAMPORTS = 50_000;
 
 type PythReceiverWallet = ConstructorParameters<
@@ -89,16 +88,17 @@ export async function sendWithFreshPythPrice({
 }: SendWithFreshPythPriceParams): Promise<string[]> {
   const feedIdHexes = feedIds.map(feedIdBytesToHex);
 
-  const pythServer = new HermesClient(
-    process.env.NEXT_PUBLIC_PYTH_HERMES_URL ?? DEFAULT_HERMES_ENDPOINT,
-    process.env.NEXT_PUBLIC_PYTH_API_KEY
-      ? { accessToken: process.env.NEXT_PUBLIC_PYTH_API_KEY }
-      : undefined,
-  );
+  // Goes through our /api/hermes proxy, which adds the server-side Pyth key.
+  const pythServer = createHermesClient();
 
-  const latestPrices = await pythServer.getLatestPriceUpdates(feedIdHexes, {
-    encoding: "base64",
-  });
+  let latestPrices: Awaited<ReturnType<typeof pythServer.getLatestPriceUpdates>>;
+  try {
+    latestPrices = await pythServer.getLatestPriceUpdates(feedIdHexes, {
+      encoding: "base64",
+    });
+  } catch (error) {
+    throw new Error(`Pyth price update failed: ${describeHermesError(error)}`);
+  }
   const priceBytes = latestPrices.binary.data;
 
   if (!priceBytes.length) {

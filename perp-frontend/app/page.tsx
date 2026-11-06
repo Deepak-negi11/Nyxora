@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
-import { Check, ChevronDown, Copy, LogOut } from "lucide-react";
+import { Check, ChevronDown, Copy, LogOut, Maximize2, Minimize2 } from "lucide-react";
 import { LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useMarket } from "@/hooks/useMarket";
@@ -13,17 +13,20 @@ import { useTradeHistory } from "@/hooks/useTradeHistory";
 import { useUserCollateral } from "@/hooks/useUserCollateral";
 import {
   formatBps,
+  formatPrice,
   lamportsToToken,
   shortenAddress,
 } from "@/lib/format";
+import { fetchChange24h } from "@/lib/candles";
 import {
   DEFAULT_MARKET,
+  MARKET_DESCRIPTIONS,
   MARKET_LABELS,
   MARKET_SYMBOLS,
   type MarketSymbol,
 } from "@/lib/constants";
 import AdminPanel from "./components/AdminPanel";
-import PerpChart, { type ChartTimeframe } from "./components/PerpChart";
+import TradingViewChart from "./components/TradingViewChart";
 import PositionsDock from "./components/PositionsDock";
 import TradeTicket from "./components/TradeTicket";
 import OnChainActivity from "./components/OnChainActivity";
@@ -39,7 +42,6 @@ const WalletMultiButton = dynamic(
   { ssr: false },
 );
 
-const TIMEFRAMES: ChartTimeframe[] = ["5m", "15m", "1h"];
 const DEFAULT_TRADING_FEE_BPS = 10;
 const CONFIGURED_ADMIN_WALLET = process.env.NEXT_PUBLIC_ADMIN_WALLET?.trim();
 type AppView = "trade" | "positions" | "pool" | "profile";
@@ -77,14 +79,15 @@ function beginPointerResize(
 }
 
 export default function Home() {
-  const [timeframe, setTimeframe] = useState<ChartTimeframe>("15m");
+  const chartPanelRef = useRef<HTMLDivElement>(null);
+  const [chartExpanded, setChartExpanded] = useState(false);
   const [selectedMarket, setSelectedMarket] = useState<MarketSymbol>(DEFAULT_MARKET);
   const [isMarketMenuOpen, setIsMarketMenuOpen] = useState(false);
   const [marketMenuDirection, setMarketMenuDirection] = useState<"up" | "down">("down");
   const marketMenuRef = useRef<HTMLDivElement>(null);
   const [activeView, setActiveView] = useState<AppView>("trade");
   const [ticketWidth, setTicketWidth] = useState(360);
-  const [dockHeight, setDockHeight] = useState(240);
+  const [dockHeight, setDockHeight] = useState(170);
   const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const [solBalance, setSolBalance] = useState(0);
   const [change24h, setChange24h] = useState<number | null>(null);
@@ -132,8 +135,12 @@ export default function Home() {
   const fundingRate =
     openInterest > 0 ? ((oiLong - oiShort) / openInterest) * 0.05 : 0;
   const isProgramMissing = marketError === "Program not deployed on devnet";
+  // Only real setup states get the banner; transient RPC errors (e.g. 429 rate
+  // limits from the public devnet RPC) must not claim the market is missing.
+  const needsMarketSetup =
+    isProgramMissing || marketError === "Market not initialized";
   const marketStats = [
-    { label: "Ratio", value: displayPrice.toFixed(6) },
+    { label: selectedMarket === "SOLUSD" ? "Price" : "Ratio", value: formatPrice(displayPrice) },
     {
       label: "24H",
       value:
@@ -158,24 +165,46 @@ export default function Home() {
     { label: "Pool Balance", value: `${poolBalance.toFixed(2)} USDC` },
   ];
 
+  // Expanded chart: a fixed overlay that works everywhere (incl. iPhone, which
+  // has no element fullscreen), upgraded to native fullscreen when allowed.
+  useEffect(() => {
+    if (!chartExpanded) return;
+    const onFullscreenChange = () => {
+      if (!document.fullscreenElement) setChartExpanded(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setChartExpanded(false);
+    };
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    window.addEventListener("keydown", onKeyDown);
+    document.documentElement.classList.add("chart-expanded-lock");
+    return () => {
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+      window.removeEventListener("keydown", onKeyDown);
+      document.documentElement.classList.remove("chart-expanded-lock");
+    };
+  }, [chartExpanded]);
+
+  const toggleChartExpanded = useCallback(() => {
+    if (chartExpanded) {
+      setChartExpanded(false);
+      if (document.fullscreenElement) void document.exitFullscreen().catch(() => {});
+      return;
+    }
+    setChartExpanded(true);
+    chartPanelRef.current
+      ?.requestFullscreen?.()
+      .catch(() => {
+        /* not allowed here: the CSS overlay still fills the window */
+      });
+  }, [chartExpanded]);
+
   useEffect(() => {
     const abort = new AbortController();
-    const BENCH = "https://benchmarks.pyth.network/v1/shims/tradingview/history";
     async function load24h() {
       try {
-        const to = Math.floor(Date.now() / 1000);
-        const from = to - 25 * 3600;
-        const q = `resolution=60&from=${from}&to=${to}`;
-        const [baseRes, quoteRes] = await Promise.all([
-          fetch(`${BENCH}?symbol=${encodeURIComponent(`Crypto.${baseAsset}/USD`)}&${q}`, { signal: abort.signal }),
-          fetch(`${BENCH}?symbol=${encodeURIComponent(`Crypto.${quoteAsset}/USD`)}&${q}`, { signal: abort.signal }),
-        ]);
-        const base = await baseRes.json();
-        const quote = await quoteRes.json();
-        if (base.s !== "ok" || quote.s !== "ok" || !base.c?.length || !quote.c?.length) return;
-        const ratioThen = base.c[0] / quote.c[0];
-        const ratioNow = base.c[base.c.length - 1] / quote.c[quote.c.length - 1];
-        if (ratioThen > 0) setChange24h((ratioNow / ratioThen - 1) * 100);
+        const change = await fetchChange24h(selectedMarket, abort.signal);
+        if (!abort.signal.aborted) setChange24h(change);
       } catch {
         /* keep last value on failure */
       }
@@ -186,7 +215,7 @@ export default function Home() {
       abort.abort();
       clearInterval(interval);
     };
-  }, [baseAsset, quoteAsset]);
+  }, [selectedMarket]);
 
   useEffect(() => {
     if (!isMarketMenuOpen) return;
@@ -414,8 +443,12 @@ export default function Home() {
               ) : null}
             </div>
             <div className="market-pair">
-              <span>Ratio perpetual</span>
-              <strong>{baseAsset}/USD ÷ {quoteAsset}/USD</strong>
+              <span>{MARKET_DESCRIPTIONS[selectedMarket]}</span>
+              <strong>
+                {quoteAsset === "USD"
+                  ? `${baseAsset}/USD · Pyth oracle`
+                  : `${baseAsset}/USD ÷ ${quoteAsset}/USD`}
+              </strong>
             </div>
           </div>
 
@@ -429,7 +462,15 @@ export default function Home() {
           </div>
 
           <div className="market-pyth-prices">
-            <span>{marketPair} · PYTH</span>
+            <span
+              title={
+                priceData?.source === "spot"
+                  ? "Live Binance spot price (WebSocket). Indicative only: trades settle on the Pyth oracle price."
+                  : undefined
+              }
+            >
+              {marketPair} · {priceData?.source === "spot" ? "BINANCE LIVE" : "PYTH"}
+            </span>
             <strong>
               ${priceData?.basePrice?.toFixed(2) ?? "-"} · $
               {priceData?.quotePrice?.toFixed(2) ?? "-"}
@@ -437,7 +478,7 @@ export default function Home() {
           </div>
         </section>
 
-        {marketError ? (
+        {needsMarketSetup ? (
           <div className="terminal-alert setup-alert">
             <span>
               {isProgramMissing
@@ -477,46 +518,39 @@ export default function Home() {
         >
           <section
             className="chart-stack"
-            style={{ gridTemplateRows: `minmax(0, 1fr) ${dockHeight}px` } as React.CSSProperties}
+            style={{ gridTemplateRows: `minmax(340px, 1fr) ${dockHeight}px` } as React.CSSProperties}
           >
-            <div className="terminal-chart-panel">
+            <div
+              className={`terminal-chart-panel tv-mode${chartExpanded ? " chart-expanded" : ""}`}
+              ref={chartPanelRef}
+            >
               <div className="chart-panel-title">
                 <div>
                   <strong>{marketDash}</strong>
-                  <span>{displayPrice.toFixed(6)}</span>
+                  <span>{formatPrice(displayPrice)}</span>
                 </div>
-                <em>MagicBlock ER</em>
-              </div>
-              <div className="chart-toolbar">
-                <div className="timeframe-row">
-                  {TIMEFRAMES.map((item) => (
-                    <button
-                      className={item === timeframe ? "active" : ""}
-                      key={item}
-                      onClick={() => setTimeframe(item)}
-                    >
-                      {item}
-                    </button>
-                  ))}
-                </div>
-                <div className="chart-readout">
-                  <span>
-                    {marketPair} · {timeframe} · Nyxora
-                  </span>
+                <div className="chart-title-right">
+                  <em>MagicBlock ER</em>
+                  <button
+                    aria-label={chartExpanded ? "Exit fullscreen chart" : "Fullscreen chart"}
+                    className="chart-fullscreen-btn"
+                    onClick={toggleChartExpanded}
+                    title={chartExpanded ? "Exit fullscreen (Esc)" : "Fullscreen chart"}
+                    type="button"
+                  >
+                    {chartExpanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+                    <span>{chartExpanded ? "Exit" : "Expand"}</span>
+                  </button>
                 </div>
               </div>
-              <PerpChart
-                price={displayPrice}
-                timeframe={timeframe}
-                market={selectedMarket}
-              />
+              <TradingViewChart market={selectedMarket} />
             </div>
 
             <div className="dock-wrapper" style={{ position: "relative", height: "100%", minHeight: 0 }}>
               <button
                 className="dock-resize-handle"
                 onPointerDown={startVerticalResize}
-                onDoubleClick={() => setDockHeight(dockHeight === 600 ? 240 : 600)}
+                onDoubleClick={() => setDockHeight(dockHeight === 600 ? 170 : 600)}
                 aria-label="Resize dock"
               />
               {market ? (

@@ -31,6 +31,16 @@ export const MARKET_LABELS: Record<MarketSymbol, string> = {
   SOLHYPE: "SOL/HYPE",
 };
 
+/**
+ * Spot pairs used to draw chart history. Candles are BASE/USDT ÷ QUOTE/USDT, so the
+ * USDT leg cancels and the chart tracks the same ratio as the Pyth oracle
+ * (SOL/USD ÷ USDC/USD, SOL/USD ÷ HYPE/USD).
+ */
+export const MARKET_CANDLE_PAIRS: Record<MarketSymbol, { base: string; quote: string }> = {
+  SOLUSD: { base: "SOLUSDT", quote: "USDCUSDT" },
+  SOLHYPE: { base: "SOLUSDT", quote: "HYPEUSDT" },
+};
+
 export const MARKET_DESCRIPTIONS: Record<MarketSymbol, string> = {
   SOLUSD: "Standard SOL perpetual",
   SOLHYPE: "SOL ÷ HYPE ratio perpetual",
@@ -44,6 +54,7 @@ export const LEGACY_MARKET_PDA = new PublicKey(
 );
 
 export const RPC_ENDPOINT =
-  process.env.NEXT_PUBLIC_SOLANA_RPC_URL ?? "https://api.devnet.solana.com";
+  // `||` (not `??`) so an empty value in .env.local falls back to public devnet.
+  process.env.NEXT_PUBLIC_SOLANA_RPC_URL?.trim() || "https://api.devnet.solana.com";
 
 export const COLLATERAL_DECIMALS = 6;

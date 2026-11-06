@@ -124,3 +124,179 @@
 .history-tx-link {
   transition: color 0.15s ease, background 0.15s ease;
 }
+
+/*
+ * Stack the workspace below 1180px. nyxora-terminal.css has a later
+ * (max-width: 1360px) rule that re-applied the 3-column grid at every width,
+ * squeezing the chart into ~60% of the screen on tablets and phones.
+ */
+@media (max-width: 1180px) {
+  .terminal-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Chart title: label + fullscreen button */
+.chart-panel-title .chart-title-right {
+  align-items: center;
+  gap: 12px;
+}
+
+.chart-fullscreen-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid #262626;
+  border-radius: 6px;
+  color: #b4b4b4;
+  background: #0c0c0c;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.chart-fullscreen-btn:hover {
+  color: #f2f2f2;
+  border-color: rgba(225, 29, 72, 0.45);
+  background: rgba(225, 29, 72, 0.14);
+}
+
+.chart-fullscreen-btn:focus-visible {
+  outline: 2px solid #e11d48;
+  outline-offset: 2px;
+}
+
+/* Chart panel = title row + TradingView (no separate toolbar row) */
+.terminal-chart-panel.tv-mode {
+  grid-template-rows: 42px minmax(0, 1fr);
+}
+
+@media (max-width: 900px) {
+  .terminal-chart-panel.tv-mode {
+    grid-template-rows: 38px minmax(0, 1fr);
+  }
+}
+
+.tv-chart-stage {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  background: #151515;
+}
+
+.tv-chart-host {
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+}
+
+.tv-chart-host iframe {
+  display: block;
+}
+
+.tv-chart-attribution {
+  padding: 3px 10px;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+}
+
+.tv-chart-attribution a {
+  color: #6b7280;
+  text-decoration: none;
+}
+
+.tv-chart-attribution a:hover {
+  color: #2962ff;
+}
+
+/*
+ * Chart sizing: fit the trade screen to the window (header, stats, chart and
+ * positions dock visible without scrolling), with a minimum so TradingView's
+ * toolbars stay usable on short screens. Use "Expand" for a full-window chart.
+ * (!important matches the rules in nyxora-terminal.css that it overrides.)
+ */
+.terminal-workspace {
+  height: calc(100vh - 158px);
+  min-height: 520px;
+}
+
+/* globals.css forces a 640px row at 921–1320px, which overflowed laptop screens. */
+@media (min-width: 1181px) {
+  .terminal-workspace {
+    grid-template-rows: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 1180px) {
+  .terminal-workspace {
+    height: auto;
+    min-height: 0;
+  }
+
+  .chart-stack {
+    grid-template-rows: minmax(480px, 70vh) minmax(170px, var(--dock-height, 200px)) !important;
+  }
+
+  .terminal-chart-panel {
+    min-height: 480px;
+  }
+}
+
+@media (max-width: 640px) {
+  .chart-stack {
+    grid-template-rows: minmax(440px, 66vh) minmax(160px, 210px) !important;
+  }
+
+  .terminal-chart-panel {
+    min-height: 440px;
+  }
+
+  .chart-fullscreen-btn span {
+    display: none;
+  }
+}
+
+/* Expanded chart: fixed overlay (and native fullscreen when the browser allows) */
+.terminal-chart-panel.chart-expanded,
+.terminal-chart-panel:fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  background: #111;
+}
+
+html.chart-expanded-lock,
+html.chart-expanded-lock body {
+  overflow: hidden;
+}
+
+/* The workspace is a stacking context (z-index: 1) under the sticky top nav
+   (z-index: 40); lift it so the expanded chart covers everything. */
+html.chart-expanded-lock .terminal-workspace {
+  z-index: 1000;
+}
+
+/* Top nav: align logo/tabs with the content edge below (was 7.4vw inset). */
+.terminal-topnav {
+  padding-inline: 14px;
+}
+
+@media (max-width: 1360px) {
+  .terminal-topnav {
+    padding-inline: 10px;
+  }
+}
+
+@media (max-width: 760px) {
+  .terminal-topnav {
+    padding-inline: 6px;
+  }
+}

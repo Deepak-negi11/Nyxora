@@ -22,7 +22,13 @@ export default function WalletContextProvider({ children }: { children: ReactNod
   );
 
   return (
-    <ConnectionProvider endpoint={RPC_ENDPOINT}>
+    // On HTTP 429, web3.js retries the same call up to 4 more times, which turns
+    // one rate-limit hit into a burst. Our hooks poll and refetch anyway, so fail
+    // fast instead and let the next scheduled read try again.
+    <ConnectionProvider
+      endpoint={RPC_ENDPOINT}
+      config={{ commitment: "confirmed", disableRetryOnRateLimit: true }}
+    >
       <WalletProvider wallets={wallets} autoConnect>
         <WalletModalProvider>{children}</WalletModalProvider>
       </WalletProvider>

@@ -11,6 +11,7 @@ import {
 } from "@solana/web3.js";
 import { getMarketPda } from "@/lib/pda";
 import { PROGRAM_ID, type MarketSymbol } from "@/lib/constants";
+import { POLL_CACHE_MS, cachedRpc, isPageVisible } from "@/lib/rpcCache";
 
 export interface PositionData {
   publicKey: PublicKey;
@@ -45,7 +46,7 @@ export function usePosition(marketSymbol: MarketSymbol = "SOLUSD") {
   const [positions, setPositions] = useState<PositionData[]>([]); 
   const [loading, setLoading] = useState(true);
 
-  const fetchPosition = useCallback(async () => {
+  const fetchPosition = useCallback(async (maxAgeMs: number = POLL_CACHE_MS) => {
     if (!publicKey) {
       setPosition(null);
       setPositions([]);
@@ -71,20 +72,16 @@ export function usePosition(marketSymbol: MarketSymbol = "SOLUSD") {
       const positionAccount = program.account as unknown as PositionAccountClient;
       const marketAddress = getMarketPda(marketSymbol);
 
-      const positionAccounts = await positionAccount.position.all([
-        {
-          memcmp: {
-            offset: 8,
-            bytes: publicKey.toBase58(),
-          },
-        },
-        {
-          memcmp: {
-            offset: 40,
-            bytes: marketAddress.toBase58(),
-          },
-        },
-      ]);
+      // getProgramAccounts is expensive; share it across hook instances.
+      const positionAccounts = await cachedRpc(
+        `positions:${publicKey.toBase58()}:${marketAddress.toBase58()}`,
+        () =>
+          positionAccount.position.all([
+            { memcmp: { offset: 8, bytes: publicKey.toBase58() } },
+            { memcmp: { offset: 40, bytes: marketAddress.toBase58() } },
+          ]),
+        maxAgeMs,
+      );
 
       const openPositions = positionAccounts
         .map(
@@ -123,12 +120,14 @@ export function usePosition(marketSymbol: MarketSymbol = "SOLUSD") {
     ];
     const subscriptionId = connection.onProgramAccountChange(
       PROGRAM_ID,
-      () => fetchPosition(),
+      () => fetchPosition(0),
       "confirmed",
       ownerAndMarketFilters,
     );
     // 3) Safety net every 30s.
-    const safetyTimer = setInterval(fetchPosition, 30_000);
+    const safetyTimer = setInterval(() => {
+      if (isPageVisible()) void fetchPosition();
+    }, 30_000);
 
     return () => {
       window.clearTimeout(initialFetch);
@@ -138,10 +137,10 @@ export function usePosition(marketSymbol: MarketSymbol = "SOLUSD") {
   }, [connection, marketSymbol, publicKey, fetchPosition]);
 
   const refetch = useCallback(() => {
-    fetchPosition();
-    setTimeout(fetchPosition, 1000);
-    setTimeout(fetchPosition, 2500);
-    setTimeout(fetchPosition, 5000);
+    void fetchPosition(0);
+    setTimeout(() => void fetchPosition(0), 1000);
+    setTimeout(() => void fetchPosition(0), 2500);
+    setTimeout(() => void fetchPosition(0), 5000);
   }, [fetchPosition]);
 
   return { position, positions, loading, refetch };

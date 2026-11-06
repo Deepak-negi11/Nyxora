@@ -5,6 +5,7 @@ import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { Program, AnchorProvider, BN, type Idl } from "@coral-xyz/anchor";
 import { getUserCollateralPda } from "@/lib/pda";
 import idl from "@/lib/idl/solperp_anchor.json";
+import { POLL_CACHE_MS, cachedRpc, isPageVisible } from "@/lib/rpcCache";
 import type { MarketSymbol } from "@/lib/constants";
 import { PublicKey, type Transaction, type VersionedTransaction } from "@solana/web3.js";
 
@@ -32,7 +33,7 @@ export function useUserCollateral(_marketSymbol: MarketSymbol = "SOLUSD") {
   const [data, setData] = useState<UserCollateralData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (maxAgeMs: number = POLL_CACHE_MS) => {
     if (!publicKey) {
       setData(null);
       setLoading(false);
@@ -55,7 +56,12 @@ export function useUserCollateral(_marketSymbol: MarketSymbol = "SOLUSD") {
       const provider = new AnchorProvider(connection, dummyWallet, { commitment: "confirmed" });
       const program = new Program(idl as Idl, provider);
       const collateralAccount = program.account as unknown as UserCollateralAccountClient;
-      const account = await collateralAccount.userCollateral.fetch(pda);
+      // Shared across the page, ticket and dock instances of this hook.
+      const account = await cachedRpc(
+        `collateral:${pda.toBase58()}`,
+        () => collateralAccount.userCollateral.fetch(pda),
+        maxAgeMs,
+      );
       setData(account);
     } catch {
       setData(null);
@@ -71,9 +77,10 @@ export function useUserCollateral(_marketSymbol: MarketSymbol = "SOLUSD") {
     }
 
     const pda = getUserCollateralPda(publicKey);
-    const subId = connection.onAccountChange(pda, () => fetchData(),
-  "confirmed");
-    const interval = setInterval(fetchData, 10_000)
+    const subId = connection.onAccountChange(pda, () => fetchData(0), "confirmed");
+    const interval = setInterval(() => {
+      if (isPageVisible()) void fetchData();
+    }, 30_000);
 
    return () => {
         window.clearTimeout(initialFetch);
@@ -83,10 +90,10 @@ export function useUserCollateral(_marketSymbol: MarketSymbol = "SOLUSD") {
     }, [connection, publicKey, fetchData]);
 
   const refetch = useCallback(() => {
-    fetchData();
-    setTimeout(fetchData, 1000);
-    setTimeout(fetchData, 2500);
-    setTimeout(fetchData, 5000);
+    void fetchData(0);
+    setTimeout(() => void fetchData(0), 1000);
+    setTimeout(() => void fetchData(0), 2500);
+    setTimeout(() => void fetchData(0), 5000);
   }, [fetchData]);
 
   // Available collateral is the free balance the user can withdraw or use for a

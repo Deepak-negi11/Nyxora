@@ -16,6 +16,10 @@ import {
   getMarketPda,
   getUserCollateralPda,
 } from "@/lib/pda";
+import { cachedRpc } from "@/lib/rpcCache";
+
+/** History is costly (up to ~100 getTransaction calls); reuse it for a minute. */
+const HISTORY_CACHE_MS = 60_000;
 
 export interface TradeHistoryItem {
   id: string;
@@ -66,7 +70,7 @@ export function useTradeHistory() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchHistory = useCallback(async () => {
+  const fetchHistory = useCallback(async (maxAgeMs: number = HISTORY_CACHE_MS) => {
     if (!publicKey) {
       setHistory([]);
       setError(null);
@@ -75,6 +79,23 @@ export function useTradeHistory() {
 
     setLoading(true);
     try {
+      const owner = publicKey;
+      // One load shared by every component that shows history (page, dock, activity).
+      const historyItems = await cachedRpc(
+        `history:${owner.toBase58()}`,
+        () => loadHistory(owner),
+        maxAgeMs,
+      );
+      setHistory(historyItems);
+      setError(null);
+    } catch (caught) {
+      setHistory([]);
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setLoading(false);
+    }
+
+    async function loadHistory(publicKey: PublicKey): Promise<TradeHistoryItem[]> {
       const sharedCollateral = getUserCollateralPda(publicKey);
       const legacyCollateral = getLegacyUserCollateralPda(
         publicKey,
@@ -95,11 +116,7 @@ export function useTradeHistory() {
         new Set(signatureGroups.flat().map((item) => item.signature)),
       ).slice(0, MAX_SIGNATURES_TO_PARSE);
 
-      if (!signatures.length) {
-        setHistory([]);
-        setError(null);
-        return;
-      }
+      if (!signatures.length) return [];
 
       const transactions: Array<{
         signature: string;
@@ -187,19 +204,16 @@ export function useTradeHistory() {
       });
 
       historyItems.sort((a, b) => b.blockTime - a.blockTime);
-      setHistory(historyItems);
-      setError(null);
-    } catch (caught) {
-      setHistory([]);
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setLoading(false);
+      return historyItems;
     }
   }, [connection, publicKey]);
 
   useEffect(() => {
-    void Promise.resolve().then(fetchHistory);
+    void Promise.resolve().then(() => fetchHistory());
   }, [fetchHistory]);
 
-  return { history, loading, error, refetch: fetchHistory };
+  // After a trade, force a fresh read instead of the cached one.
+  const refetch = useCallback(() => fetchHistory(0), [fetchHistory]);
+
+  return { history, loading, error, refetch };
 }

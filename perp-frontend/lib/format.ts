@@ -40,3 +40,17 @@ export function lamportsToToken(amount: BN | number, decimals: number = 6): numb
   const rawNumber = typeof amount === "number" ? amount : amount.toNumber();
   return rawNumber / Math.pow(10, decimals);
 }
+
+/** Decimal places that suit a price's magnitude: 90.12 → 2, 1.1523 → 4, 0.041662 → 6. */
+export function pricePrecision(price: number): number {
+  const abs = Math.abs(price);
+  if (!Number.isFinite(abs) || abs === 0) return 4;
+  if (abs >= 10) return 2;
+  if (abs >= 1) return 4;
+  return 6;
+}
+
+export function formatPrice(price: number): string {
+  if (!Number.isFinite(price) || price <= 0) return "—";
+  return price.toFixed(pricePrecision(price));
+}

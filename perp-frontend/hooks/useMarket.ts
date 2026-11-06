@@ -7,6 +7,7 @@ import { getMarketPda } from "@/lib/pda";
 import { DEFAULT_MARKET, PROGRAM_ID } from "@/lib/constants";
 import type { MarketSymbol } from "@/lib/constants";
 import idl from "@/lib/idl/solperp_anchor.json";
+import { POLL_CACHE_MS, cachedRpc, isPageVisible } from "@/lib/rpcCache";
 import { PublicKey, type Transaction, type VersionedTransaction } from "@solana/web3.js";
 
 export interface MarketData {
@@ -41,12 +42,17 @@ export function useMarket(marketSymbol: MarketSymbol = DEFAULT_MARKET) {
   const [error, setError] = useState<string | null>(null);
   const [marketPda, setMarketPda] = useState<PublicKey | null>(null);
 
-  const fetchMarket = useCallback(async () => {
+  const fetchMarket = useCallback(async (maxAgeMs: number = POLL_CACHE_MS) => {
     try {
       const pda = getMarketPda(marketSymbol);
       setMarketPda(pda);
 
-      const programAccount = await connection.getAccountInfo(PROGRAM_ID);
+      // Whether the program is deployed rarely changes: check it every 5 minutes, not every poll.
+      const programAccount = await cachedRpc(
+        "program-account",
+        () => connection.getAccountInfo(PROGRAM_ID),
+        5 * 60_000,
+      );
       if (!programAccount) {
         setMarket(null);
         setError("Program not deployed on devnet");
@@ -67,7 +73,11 @@ export function useMarket(marketSymbol: MarketSymbol = DEFAULT_MARKET) {
       const provider = new AnchorProvider(connection, dummyWallet, { commitment: "confirmed" });
       const program = new Program(idl as Idl, provider);
       const marketAccount = program.account as unknown as MarketAccountClient;
-      const data = await marketAccount.market.fetch(pda);
+      const data = await cachedRpc(
+        `market:${pda.toBase58()}`,
+        () => marketAccount.market.fetch(pda),
+        maxAgeMs,
+      );
       setMarket(data);
       setError(null);
     } catch (e: unknown) {
@@ -84,12 +94,14 @@ export function useMarket(marketSymbol: MarketSymbol = DEFAULT_MARKET) {
   }, [connection, marketSymbol]);
 
   useEffect(() => {
-    void Promise.resolve().then(fetchMarket);
+    void Promise.resolve().then(() => fetchMarket());
 
     const pda = getMarketPda(marketSymbol);
-    const subId = connection.onAccountChange(pda , ()=> fetchMarket(),"confirmed");
-
-    const interval = setInterval(fetchMarket, 10_000);
+    // The subscription pushes changes; polling is only a slow safety net.
+    const subId = connection.onAccountChange(pda, () => fetchMarket(0), "confirmed");
+    const interval = setInterval(() => {
+      if (isPageVisible()) void fetchMarket();
+    }, 30_000);
     return () => {
       connection.removeAccountChangeListener(subId);
       clearInterval(interval);
@@ -97,10 +109,10 @@ export function useMarket(marketSymbol: MarketSymbol = DEFAULT_MARKET) {
   }, [connection, marketSymbol,fetchMarket]);
 
   const refetch = useCallback(() => {
-    fetchMarket();
-    setTimeout(fetchMarket, 1000);
-    setTimeout(fetchMarket, 2500);
-    setTimeout(fetchMarket, 5000);
+    void fetchMarket(0);
+    setTimeout(() => void fetchMarket(0), 1000);
+    setTimeout(() => void fetchMarket(0), 2500);
+    setTimeout(() => void fetchMarket(0), 5000);
   }, [fetchMarket]);
 
   return { market, marketPda, loading, error, refetch };

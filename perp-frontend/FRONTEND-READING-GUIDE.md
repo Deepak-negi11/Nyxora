@@ -65,7 +65,7 @@ There is no single `main()` like in Rust. Next.js has rules:
 | # | File | What it is, in one plain line |
 |---|---|---|
 | 17 | `app/components/MarketRail.tsx` | Left strip: pick SOL/ETH/WBTC, see each market's ticker. |
-| 18 | `app/components/PerpChart.tsx` | The **candlestick chart** (lightweight-charts + Binance candles). *(This is the file to swap for KLineChart for advanced charts.)* |
+| 18 | `app/components/TradingViewChart.tsx` | The **price chart**: TradingView's free Advanced Chart widget on Pyth feeds (`PYTH:SOLUSD`, `PYTH:SOLUSD/PYTH:HYPEUSD`). |
 | 19 | `app/components/TradeTicket.tsx` | The **order form**: long/short, size, leverage, submit. |
 | 20 | `app/components/PositionsDock.tsx` | Bottom dock with tabs: Positions, Balances, Trade History, Live Trades. |
 | 21 | `app/components/CollateralPanel.tsx` | **Deposit / withdraw** USDC. |
@@ -94,16 +94,17 @@ screen updates* — repeats for every action (deposit, close, liquidate).
 
 ---
 
-## Advanced charts — quick note (saved here so you don't lose it)
+## Charts — what we use and why
 
-- Today `PerpChart.tsx` uses **`lightweight-charts`** = candles only, **no drawing
-  tools, no indicators**.
-- **TradingView Advanced Charting Library**: free but needs a form/approval (asks for a
-  company/website — use your live Vercel URL). It self-hosts in `/public`, so it **does
-  work on Vercel**. Slow to get access.
-- **Fastest path for you → KLineChart** (`npm i klinecharts`): MIT, **no approval**,
-  works on Vercel, has **drawing tools + 50+ indicators**. Swap it into `PerpChart.tsx`.
-  - Repo: https://github.com/klinecharts/KLineChart  *(open once to confirm)*
+- **Now:** TradingView's free **Advanced Chart widget** (`TradingViewChart.tsx`):
+  full TradingView UI (drawing tools, 100+ indicators), no approval needed, on
+  Pyth's feeds published on TradingView. It runs in an iframe, so the app can't
+  push data or draw positions/liquidation lines into it.
+- **History:** we tried `lightweight-charts`, then **KLineChart** on our own data.
+  The Pyth history endpoint behind it was retired on 26 Aug 2026.
+- **If you need positions on the chart later:** the **TradingView Advanced
+  Charting Library** (free, but needs a form/approval) runs on your own data and
+  supports custom lines. It self-hosts in `/public`, so it works on Vercel.
 
 ---
 
